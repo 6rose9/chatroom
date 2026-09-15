@@ -1,0 +1,180 @@
+import { auth, provider } from "./firebaseConfig";
+import {
+    createUserWithEmailAndPassword,
+    updateProfile,
+    signInWithEmailAndPassword,
+    signOut,
+    sendPasswordResetEmail,
+    onAuthStateChanged,
+    signInWithPopup
+} from "firebase/auth";
+
+export interface UserData{
+    fullname:string;
+    email:string;
+    password:string
+}
+export class Authorize {
+    private defaultprofileimg;
+    constructor() {
+        this.defaultprofileimg = "https://static.thenounproject.com/png/65476-200.png";
+    }
+
+    // helper to redirect relative to current directory 
+    redirectTo(page: string):void {
+        const base = window.location.pathname.replace(/\/[^/]*$/, '/');
+        window.location.href = base + page;
+    }
+
+    // Register user with fullname email & password
+    async registerUser(user: UserData):Promise<void> {
+
+        try {
+
+            const userCredential = await createUserWithEmailAndPassword(auth, user.email, user.password);
+            const authUser = userCredential.user;
+
+            // Update user profile 
+            await updateProfile(authUser, {
+                displayName: user.fullname,
+                photoURL: this.defaultprofileimg
+            });
+
+            // Save username locally 
+            this.setLocalName(authUser);
+
+            // Redirect to index 
+            // window.location.href = "../index.html";
+
+            this.redirectTo("index.html");
+
+        } catch (error: any) {
+            console.error("Error registering users : ", error);
+            window.alert(error.message);
+        }
+
+    }
+
+    // Login user with email & password
+    async loginUser(email:string, password:string):Promise<void> {
+
+        try {
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            const user = userCredential.user;
+
+            // set name to localstorage 
+            this.setLocalName(user);
+
+            // Redirect to index.html
+            // window.location.href = "../index.html";
+
+            this.redirectTo("index.html");
+
+        } catch (error: any) {
+            console.error("Error logging in : ", error);
+            window.alert(error.message);
+        }
+
+    }
+
+    // Logout user
+    async logoutUser():Promise<void> {
+
+        try {
+
+            await signOut(auth);
+
+            // unset name from localstorage 
+            this.unsetLocalName();
+
+            // Redirect to signin.html
+            // window.location.href="../signin.html";
+
+            this.redirectTo("signin.html");
+
+        } catch (error:any) {
+            console.error("Error logging out : ", error);
+            window.alert(error.message);
+        }
+
+    }
+
+    // Reset password
+    async resetPassword(email:string, msgElement:HTMLElement):Promise<void> {
+
+        try {
+
+            await sendPasswordResetEmail(auth, email);
+
+            msgElement.textContent = "Password reset email send. Please check your inbox.";
+            msgElement.style.color = "green";
+            msgElement.style.fontSize = "11px";
+
+        } catch (error:any) {
+
+            console.error("Error sending password reset email = ", error);
+            window.alert(error.message);
+
+            msgElement.textContent = `Error : ${error.message}`;
+            msgElement.style.color = "red";
+            msgElement.style.fontSize = "11px";
+
+        }
+
+    }
+
+    // Google Login
+    async googleLogin():Promise<void> {
+
+        try {
+            const result = await signInWithPopup(auth, provider);
+
+            // set name to localstorage 
+            this.setLocalName(result.user);
+
+            // Redirect to index.html
+            // window.location.href = "../index.html";
+
+            this.redirectTo("index.html");
+
+        } catch (error:any) {
+            console.error("Error with Google sign-in = ", error);
+            window.alert(error.message);
+        }
+
+    }
+
+    // Check if user is logged in
+    isLoggedIn():void {
+
+        onAuthStateChanged(auth, (user) => {
+            if (!user) {
+                // Redirect to sign.html
+                // window.location.href = "../signin.html";
+
+                this.redirectTo("../signin.html");
+            }
+        });
+
+    }
+
+    // Get current user Info
+    getUser(callback: (user:any)=>void):void {
+        onAuthStateChanged(auth, (user) => {
+            if (user) callback(user);
+        });
+    }
+
+
+    // Local storage helper methods 
+    private setLocalName(userdata:any):void {
+        localStorage.setItem("username", userdata.displayName || "Guest");
+    }
+
+    private unsetLocalName():void {
+        localStorage.removeItem("username");
+    }
+
+}
+
+

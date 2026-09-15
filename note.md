@@ -1,0 +1,238 @@
+### Best practical setup for this project
+
+For a real app, the best practical pattern is not "one giant shared bundle for every HTML file". In production, each page should usually have its own entry point and its own generated HTML.
+
+For this chatroom project, a practical setup is:
+
+- `index.html` for the chat app
+- `view/signin.html`, `view/signup.html`, `view/profile.html` for auth/profile pages
+- one TypeScript entry per page, for example:
+  - `src/app.ts` for chat page
+  - `src/auth/signin.ts` for sign in
+  - `src/auth/signup.ts` for sign up
+  - `src/auth/profile.ts` for profile
+- webpack builds one bundle for each page using `entry: { ... }`
+- `HtmlWebpackPlugin` generates the corresponding HTML files into `dist`
+- link pages using normal `<a href="./view/signin.html">` links
+- keep shared logic in reusable modules, not in a single global bundle
+
+This is more maintainable than forcing every page to import the same giant JS file. For a prototype or very small app, a single shared bundle is acceptable, but for real production work, one entry per page is the better architecture.
+
+---
+
+### exports is not defined
+
+``` text
+Uncaught ReferenceError: exports is not defined
+    <anonymous> http://127.0.0.1:5500/part3_module/l40chatroom/dist/app.js:2
+
+``` 
+
+- app.js combines seperated js files using exports (commonjs module system)
+
+- Typescript targets ESM and then generates commonjs (defined by tsconfig.json)
+- Browser doesn't support standalone commonjs module
+- Need buddled JS tool (webpack/vite/...)
+
+or
+
+An alternative is changing TypeScript to emit ES modules:
+
+`"module": "esnext"`
+`"moduleResolution": "bundler"`
+
+```text 
+<script type="module" src="./app.js"></script>
+```
+
+---
+
+### Webpack build error:
+
+```text
+TS2307: Cannot find module '!../node_modules/style-loader/...'
+```
+
+Why:
+
+- `style-loader` and `css-loader` were included in the rule for `.ts` files.
+- Webpack therefore treated `app.ts` as CSS and passed loader-generated CSS runtime code to `ts-loader`.
+- TypeScript could not resolve those generated loader imports.
+
+Solution:
+
+- Use `ts-loader` only for `.ts` files.
+- Add a separate `.css` rule using `style-loader` and `css-loader`.
+- Import the stylesheet from the TypeScript entry file, for example:
+
+```ts
+import "../css/style.css";
+```
+
+- Add a declaration such as `src/style.d.ts`:
+
+```ts
+declare module "*.css";
+```
+
+Then build and run through webpack instead of opening `dist/app.js` directly:
+
+```bash
+npm run build
+npm run dev
+```
+
+Open `http://localhost:3000`. Webpack generates `dist/bundle.js` and handles the CommonJS modules for the browser.
+
+---
+
+### HTML copy issue:
+
+- `HtmlWebpackPlugin` copies the template `index.html` into the webpack output folder.
+- Because the output folder is `dist`, webpack creates another file at `dist/index.html`.
+- This can be confusing when the real project page is the root `index.html`; opening the copied file directly may also use a different relative path for `bundle.js`.
+- After `dist/index.html` is removed, opening it gives a missing-file error because it is no longer generated.
+
+Solution:
+
+- Keep the source page at the project root: `index.html`.
+- Remove `HtmlWebpackPlugin` when the HTML page should not be copied into `dist`.
+- Load the webpack output from the root page:
+
+```html
+<script src="./dist/bundle.js"></script>
+```
+
+- Serve the project with webpack so the root page and generated bundle are available together:
+
+```bash
+npm run build
+npm run dev
+```
+
+Open `http://localhost:3000`, not `dist/index.html`.
+
+---
+
+### Why `tsc -w` is not needed:
+
+- `tsc -w` watches TypeScript files and emits separate `.js` files into the `dist` folder.
+- With `"module": "commonjs"`, `tsc -w` output uses the CommonJS module system and is not the browser-ready bundle.
+- Webpack already watches the source files, runs `ts-loader`, processes CSS, combines all modules, and creates `dist/bundle.js`.
+- Running both watchers can create duplicate or confusing output files, webpack does not use the individual JavaScript files emitted by `tsc -w`.
+
+Use webpack's watch/dev server instead:
+
+```bash
+npx tsc -w
+```
+
+Use only the bundled file from the root page:
+
+```html
+<script src="./dist/bundle.js"></script>
+```
+
+Do not load files such as `dist/app.js` directly. If you run `tsc -w` for learning or type-checking, treat its emitted files as temporary compiler output and do not use them in the browser.
+
+---
+
+### Firebase Subscription vs. SQL Connection
+
+**Core Purpose (The Similarity)**
+* Both serve as the **entry gateway/bridge** between your app and the database.
+* Both rely on an initial **network handshake** (authentication & security) to establish communication. Without either mechanism, your app cannot send or receive data.
+
+
+**Terminology**
+* **`onSnapshot()`**: The literal Firebase function you execute in code.
+* **Subscription**: The active, live real-time connection created when `onSnapshot()` runs.
+* **`unsubscribe()`**: The cleanup function returned by `onSnapshot()` used to close the connection.
+
+
+**Key Differences**
+
+| Feature | SQL Connection | Firebase Subscription (`onSnapshot`) |
+| :--- | :--- | :--- |
+| **Model** | **Pull** (Request-Response) | **Push** (Real-Time Event Stream) |
+| **Lifetime** | Short-lived (Executes a query, then closes or returns to a pool). | Long-lived (Keeps an active WebSocket connection open). |
+| **Responsibility** | **Your App** must manually ask for updates repeatedly. | **Firebase** automatically monitors changes and pushes updates to your app. |
+
+
+**Best Practice** : Clean up connections:** Always call `unsubscribe()` when leaving a page or unmounting a component to avoid memory leaks and unnecessary Firebase billing reads.
+
+---
+
+## Webpack: `serve` vs `watch`
+
+While both commands automatically rebuild your code when files change, they handle the output and developer workflow differently.
+
+#### Quick Comparison
+
+| Feature | `webpack --watch` | `webpack serve` |
+| :--- | :--- | :--- |
+| **Primary Job** | Watches source files and rebuilds output. | Runs an in-memory HTTP server with live reloading. |
+| **Output Location** | Writes compiled bundle files to disk (`/dist`). | Keeps compiled assets in memory (RAM); no disk writes. |
+| **Local Web Server** | ❌ No server provided. | ✅ Serves app locally (e.g., `http://localhost:8080`). |
+| **Browser Auto-Reload** | ❌ No (requires manual browser refresh). | ✅ Yes (automatically refreshes or uses Hot Module Replacement). |
+| **Performance** | Slower (disk I/O on every save). | Faster (operates entirely in memory). |
+
+
+### Detailed Breakdown
+
+#### 1. `webpack --watch`
+- **How it works:** Continuously monitors your project files. Whenever a file is saved, Webpack re-compiles the code and overwrites the physical files in your `dist` directory.
+- **Best for:**
+  - Libraries or package development.
+  - Backend/Node.js applications.
+  - Integration with existing non-Node servers (Laravel, Django, Rails) that serve assets directly from the `dist` folder.
+
+#### 2. `webpack serve` (`webpack-dev-server`)
+- **How it works:** Spuns up a local development server. When you save changes, it builds in RAM and updates the app in the browser instantly without requiring a page refresh.
+- **Best for:**
+  - Standard Frontend/Single Page Applications (React, Vue, vanilla JS).
+  - Rapid local UI development.
+
+
+### Summary Recommendation
+- Use **`webpack serve`** for everyday frontend web app development.
+- Use **`webpack --watch`** when you explicitly need updated physical files written to disk after every save.
+
+---
+
+## Deploy on render.com
+
+new > Static Site
+Public Directory = ./public/
+
+#### Give Domain access
+
+Firebase -> Authentication -> Settings -> Authorized domain -> add your domain
+
+---
+---
+
+        // console.log(window.location.pathname); // /l52chatroomwithauth/index.html
+        // console.log(window.location.pathname.replace(/\/[^/]*$/,'/')); // /l52chatroomwithauth/ 
+        // console.log(window.location.pathname.replace(/[^/]*$/,'')); // /l52chatroomwithauth/
+
+        // ^ start with             = '/^abc/'    = abc...
+        // $ end with               = '/abc$/'    = ...abc
+        // * quantifier 0 or more   = '/a*/'      = aaa
+        // *$ qunaitfier + end      = '/[0-9]*$/' =
+
+        // console.log(/^a/.test("abc")); // true   => start with a
+        // console.log(/^a/.test("bca")); // false  => start with a
+
+        // console.log(/[^a]/.test("abc")); // true => b and c are not a
+        // console.log(/[^a]/.test("bc")); //  true => b and c are not a
+        // console.log(/[^a]/.test("bac")); // true => b and c are not a
+        // console.log(/[^a]/.test("bca")); // true => b and c are not a
+        // console.log(/[^a]/.test("a")); //   false => a
+        // console.log(/[^a]/.test("aa")); //   false => a
+
+        // $ ->  = until end of string 
+        // [^/]* = zero or more characters that are not /
+        // /[^/]*$/
+
+---
